@@ -356,7 +356,7 @@ async function handleToolCall(name, args = {}) {
 const server = new Server(
   {
     name: "sqlserver-mcp",
-    version: "0.2.0"
+    version: "0.2.1"
   },
   {
     capabilities: {

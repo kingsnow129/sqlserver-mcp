@@ -1,11 +1,23 @@
 {
   "name": "@kingsnow129/sqlserver-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "MCP server for SQL Server operations (connect, query, schema introspection)",
+  "author": "kingsnow129",
   "type": "module",
   "main": "src/server.js",
   "bin": {
     "sqlserver-mcp": "src/server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kingsnow129/sqlserver-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kingsnow129/sqlserver-mcp/issues"
+  },
+  "homepage": "https://github.com/kingsnow129/sqlserver-mcp#readme",
+  "engines": {
+    "node": ">=18"
   },
   "files": [
     "src",

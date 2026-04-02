@@ -111,7 +111,7 @@ Then open `.vscode/mcp.json` in VS Code and start the server, or run `MCP: List 
 Install the package into the target workspace:
 
 ```bash
-npm install @kingsnow129/sqlserver-mcp@0.2.0
+npm install @kingsnow129/sqlserver-mcp@0.2.1
 ```
 
 Create `.vscode/mcp.json` in that workspace:
@@ -157,10 +157,10 @@ The following validation steps were verified:
 
 - `npm pack --dry-run` includes only the expected runtime files
 - `node src/server.js` starts correctly in this repository
-- the published package `@kingsnow129/sqlserver-mcp@0.2.0` was installed into a clean directory and successfully answered an MCP `listTools` request
+- the published package `@kingsnow129/sqlserver-mcp@0.2.1` was installed into a clean directory and successfully answered an MCP `listTools` request
 - Copilot-visible tools discovered during validation were `connect`, `health_check`, `list_schemas`, `list_tables`, `describe_table`, and `query`
 
-On this Windows environment, `npx -y @kingsnow129/sqlserver-mcp@0.2.0` did not start reliably, so the manifest intentionally uses a direct `node .../src/server.js` launch instead of the `npx <package>` shorthand.
+On this Windows environment, `npx -y @kingsnow129/sqlserver-mcp@0.2.1` did not start reliably, so the manifest intentionally uses a direct `node .../src/server.js` launch instead of the `npx <package>` shorthand.
 
 ## 6) Tools
 

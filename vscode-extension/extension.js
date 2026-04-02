@@ -2,10 +2,10 @@ const vscode = require("vscode");
 const os = require("os");
 const path = require("path");
 const fs = require("fs");
-const { execFile } = require("child_process");
+const { exec } = require("child_process");
 
 const PACKAGE_NAME = "@kingsnow129/sqlserver-mcp";
-const PACKAGE_VERSION = "0.2.0";
+const PACKAGE_VERSION = "0.2.1";
 
 function getUserPaths() {
   const home = os.homedir();
@@ -19,9 +19,10 @@ function getUserPaths() {
 
 function runCommand(command, args, cwd) {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { cwd }, (error, stdout, stderr) => {
+    const cmdLine = `${command} ${args.map(arg => `"${arg}"`).join(" ")}`;
+    exec(cmdLine, { cwd, shell: true }, (error, stdout, stderr) => {
       if (error) {
-        reject(new Error(`${command} ${args.join(" ")} failed: ${stderr || error.message}`));
+        reject(new Error(`${cmdLine} failed: ${stderr || error.message}`));
         return;
       }
       resolve({ stdout, stderr });

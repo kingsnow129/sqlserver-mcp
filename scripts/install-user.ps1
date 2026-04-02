@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $packageName = "@kingsnow129/sqlserver-mcp"
-$packageVersion = "0.2.0"
+$packageVersion = "0.2.1"
 $installRoot = Join-Path $HOME ".mcp-servers\sqlserver-mcp"
 $envTarget = Join-Path $installRoot ".env"
 $userMcpConfigPath = Join-Path $env:APPDATA "Code\User\mcp.json"
