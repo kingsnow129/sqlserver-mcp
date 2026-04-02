@@ -5,7 +5,7 @@
   "type": "module",
   "main": "src/server.js",
   "bin": {
-    "sqlserver-mcp": "./src/server.js"
+    "sqlserver-mcp": "src/server.js"
   },
   "files": [
     "src",
