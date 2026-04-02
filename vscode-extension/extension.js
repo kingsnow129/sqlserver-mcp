@@ -5,7 +5,7 @@ const fs=require("node:fs");
 const {exec}=require("node:child_process");
 
 const PACKAGE_NAME="@kingsnow129/sqlserver-mcp";
-const PACKAGE_VERSION="0.2.2";
+const PACKAGE_VERSION=require("../package.json").version;
 
 function getUserPaths() {
   const home=os.homedir();
