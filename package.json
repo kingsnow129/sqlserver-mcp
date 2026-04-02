@@ -1,6 +1,6 @@
 {
   "name": "@kingsnow129/sqlserver-mcp",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "mcpName": "io.github.kingsnow129/sqlserver-mcp",
   "description": "MCP server for SQL Server operations (connect, query, schema introspection)",
   "author": "kingsnow129",
