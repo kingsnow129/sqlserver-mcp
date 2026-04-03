@@ -13,11 +13,16 @@ It provides tools for:
 ## Release
 
 Current release:
-- NPM package: `@kingsnow129/database-mcp@0.4.2`
+- NPM package: `@kingsnow129/database-mcp@0.4.3`
 - MCP server name: `database-mcp`
-- VSIX helper: `database-mcp-helper@0.4.2`
+- VSIX helper: `database-mcp-helper@0.4.3`
 
-## What Is New In 0.4.2
+## What Is New In 0.4.3
+
+- Removed legacy naming references to `sqlserver-mcp`.
+- MCP registration now keeps only the `databaseMcp` server key.
+
+## What Was New In 0.4.2
 
 - Added SQL Server Windows integrated auth support with `integratedAuth`.
 - Added `--integratedAuth` CLI override handling in `connect` flow.
@@ -117,7 +122,7 @@ Build and install locally:
 cd vscode-extension
 npm install
 npm run package
-code --install-extension database-mcp-helper-0.4.2.vsix --force
+code --install-extension database-mcp-helper-0.4.3.vsix --force
 ```
 
 ## Safety Defaults

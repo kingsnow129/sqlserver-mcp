@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $packageName = "@kingsnow129/database-mcp"
-$packageVersion = "0.4.2"
+$packageVersion = "0.4.3"
 $installRoot = Join-Path $HOME ".mcp-servers\database-mcp"
 $envTarget = Join-Path $installRoot ".env"
 $profilesTarget = Join-Path $installRoot "profiles.json"

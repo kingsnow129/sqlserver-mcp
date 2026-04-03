@@ -2,7 +2,7 @@
   "name": "database-mcp-helper",
   "displayName": "Database MCP Helper",
   "description": "Install, manage, and uninstall user-level Database MCP profiles in VS Code.",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "publisher": "kingsnow129",
   "repository": {
     "type": "git",
