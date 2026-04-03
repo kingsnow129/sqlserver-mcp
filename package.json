@@ -1,6 +1,6 @@
 {
   "name": "@kingsnow129/database-mcp",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "mcpName": "io.github.kingsnow129/database-mcp",
   "description": "Database MCP server for SQL Server, PostgreSQL, and MySQL with profile-based auto resolution",
   "author": "kingsnow129",

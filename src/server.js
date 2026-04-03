@@ -716,15 +716,88 @@ async function runQuery(sqlText,params={}) {
   return Array.isArray(rows)? rows:[];
 }
 
+function parseSqlServerHost(host) {
+  const rawHost=String(host??"").trim();
+  const parts=rawHost.split("\\");
+  const hostOnly=parts[0]??"";
+  const instanceName=parts[1]??"";
+  return {rawHost,hostOnly,instanceName};
+}
+
+function getSqlServerProbePorts(config) {
+  const defaults=[1433,1434,1435,1436,1437];
+  const envPorts=String(process.env.DB_INSTANCE_PROBE_PORTS??"")
+    .split(",")
+    .map((value) => Number(String(value).trim()))
+    .filter((value) => Number.isInteger(value)&&value>0&&value<=65535);
+
+  const merged=[config.port,...envPorts,...defaults]
+    .filter((value) => Number.isInteger(value)&&value>0&&value<=65535);
+
+  return [...new Set(merged)];
+}
+
+function serverNameMatchesInstance(serverName,instanceName) {
+  if(!serverName||!instanceName) {
+    return false;
+  }
+
+  return String(serverName).toUpperCase().endsWith(`\\${String(instanceName).toUpperCase()}`);
+}
+
+async function connectSqlServerWithFallback(config,sqlDriver) {
+  const baseSqlConfig=createSqlServerConfig(config);
+
+  try {
+    const client=await new sqlDriver.module.ConnectionPool(baseSqlConfig).connect();
+    return {client,resolvedPort: config.port};
+  } catch(initialError) {
+    const {instanceName,hostOnly}=parseSqlServerHost(config.host);
+    const shouldProbe=config.integratedAuth&&instanceName&&!config.connectionString;
+    if(!shouldProbe) {
+      throw initialError;
+    }
+
+    const probePorts=getSqlServerProbePorts(config);
+    for(const port of probePorts) {
+      let client;
+      try {
+        const probeConfig={...config,host: hostOnly,port};
+        const probeSqlConfig=createSqlServerConfig(probeConfig);
+        client=await new sqlDriver.module.ConnectionPool(probeSqlConfig).connect();
+        const probeResult=await client.request().query("SELECT CAST(@@SERVERNAME AS nvarchar(256)) AS server_name");
+        const serverName=probeResult.recordset?.[0]?.server_name??"";
+        if(serverNameMatchesInstance(serverName,instanceName)) {
+          return {client,resolvedPort: port};
+        }
+
+        await client.close();
+      } catch {
+        if(client) {
+          try {
+            await client.close();
+          } catch {
+            // ignore cleanup failure for probe attempts
+          }
+        }
+      }
+    }
+
+    const detail=initialError instanceof Error? initialError.message:String(initialError);
+    throw new Error(`Failed to resolve SQL Server instance '${instanceName}' for host '${hostOnly}'. Set explicit port in profile (for example 1434) or configure DB_INSTANCE_PROBE_PORTS. Original error: ${detail}`);
+  }
+}
+
 async function connectPool(overrides={}) {
   const config=buildConfig(overrides);
+  let effectiveConfig={...config};
 
   await closePoolIfAny();
 
   if(config.engine==="sqlserver") {
     const sqlDriver=getSqlServerDriver(config);
-    const sqlConfig=createSqlServerConfig(config);
-    const client=await new sqlDriver.module.ConnectionPool(sqlConfig).connect();
+    const {client,resolvedPort}=await connectSqlServerWithFallback(config,sqlDriver);
+    effectiveConfig={...effectiveConfig,port: resolvedPort};
     connection={engine: "sqlserver",client,sqlDriver: sqlDriver.driverName};
   } else if(config.engine==="postgres") {
     const pgConfig=createPostgresConfig(config);
@@ -738,22 +811,23 @@ async function connectPool(overrides={}) {
     connection={engine: "mysql",client};
   }
 
-  runtimeConfig={...config};
+  runtimeConfig={...effectiveConfig};
   runtimeSettings={
-    readOnly: config.readOnly,
-    maxRows: config.maxRows
+    readOnly: effectiveConfig.readOnly,
+    maxRows: effectiveConfig.maxRows
   };
 
   return {
     connected: true,
-    alias: config.alias,
-    serverName: config.serverName,
-    profileSource: config.profileSource,
-    engine: config.engine,
+    alias: effectiveConfig.alias,
+    serverName: effectiveConfig.serverName,
+    profileSource: effectiveConfig.profileSource,
+    engine: effectiveConfig.engine,
     sqlDriver: connection?.sqlDriver,
-    host: config.host,
-    database: config.database,
-    integratedAuth: config.integratedAuth,
+    host: effectiveConfig.host,
+    port: effectiveConfig.port,
+    database: effectiveConfig.database,
+    integratedAuth: effectiveConfig.integratedAuth,
     readOnly: runtimeSettings.readOnly,
     maxRows: runtimeSettings.maxRows
   };

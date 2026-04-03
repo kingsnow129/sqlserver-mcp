@@ -13,9 +13,14 @@ It provides tools for:
 ## Release
 
 Current release:
-- NPM package: `@kingsnow129/database-mcp@0.4.4`
+- NPM package: `@kingsnow129/database-mcp@0.4.5`
 - MCP server name: `database-mcp`
-- VSIX helper: `database-mcp-helper@0.4.4`
+- VSIX helper: `database-mcp-helper@0.4.5`
+
+## What Is New In 0.4.5
+
+- Added SQL Server integrated-auth instance fallback logic: when `host` uses `server\\instance` and direct connect fails, MCP probes candidate ports and validates `@@SERVERNAME` to resolve the expected instance.
+- Added `DB_INSTANCE_PROBE_PORTS` environment variable for custom probe port lists.
 
 ## What Is New In 0.4.4
 
@@ -128,7 +133,7 @@ Build and install locally:
 cd vscode-extension
 npm install
 npm run package
-code --install-extension database-mcp-helper-0.4.4.vsix --force
+code --install-extension database-mcp-helper-0.4.5.vsix --force
 ```
 
 ## Safety Defaults
