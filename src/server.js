@@ -4,13 +4,30 @@ const _require=createRequire(import.meta.url);
 const {version: SERVER_VERSION}=_require("../package.json");
 import dotenv from "dotenv";
 import sql from "mssql";
+import pg from "pg";
+import mysql from "mysql2/promise";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {Server} from "@modelcontextprotocol/sdk/server/index.js";
 import {StdioServerTransport} from "@modelcontextprotocol/sdk/server/stdio.js";
 import {CallToolRequestSchema,ListToolsRequestSchema} from "@modelcontextprotocol/sdk/types.js";
 
 dotenv.config();
 
+const {Pool: PostgresPool}=pg;
+
+const SUPPORTED_ENGINES=new Set(["sqlserver","postgres","mysql"]);
+
 const CLI_OPTION_MAP={
+  alias: "alias",
+  serverName: "serverName",
+  defaultAlias: "defaultAlias",
+  profilesFile: "profilesFile",
+  currentServer: "currentServer",
+  currentDatabase: "currentDatabase",
+  engine: "engine",
+  host: "host",
   connectionString: "connectionString",
   server: "server",
   port: "port",
@@ -18,9 +35,26 @@ const CLI_OPTION_MAP={
   user: "user",
   password: "password",
   encrypt: "encrypt",
+  ssl: "ssl",
   trustServerCertificate: "trustServerCertificate",
   readOnly: "readOnly",
   maxRows: "maxRows"
+};
+
+const TOOL_NAMES={
+  CONNECT: "connect",
+  HEALTH_CHECK: "health_check",
+  LIST_SCHEMAS: "list_schemas",
+  LIST_TABLES: "list_tables",
+  DESCRIBE_TABLE: "describe_table",
+  QUERY: "query"
+};
+
+let connection=null;
+let runtimeConfig=null;
+let runtimeSettings={
+  readOnly: true,
+  maxRows: 200
 };
 
 function parseCliArgs(argv) {
@@ -34,7 +68,7 @@ function parseCliArgs(argv) {
 
     const rawToken=String(token).slice(2);
     if(rawToken==="help") {
-      console.error("Supported flags: --connectionString --server --port --database --user --password --encrypt --trustServerCertificate --readOnly --maxRows");
+      console.error("Supported flags: --alias --serverName --defaultAlias --profilesFile --currentServer --currentDatabase --engine --host --connectionString --server --port --database --user --password --encrypt --ssl --trustServerCertificate --readOnly --maxRows");
       process.exit(0);
     }
 
@@ -64,18 +98,6 @@ function parseCliArgs(argv) {
 
 const cliOptions=parseCliArgs(process.argv.slice(2));
 
-const TOOL_NAMES={
-  CONNECT: "connect",
-  HEALTH_CHECK: "health_check",
-  LIST_SCHEMAS: "list_schemas",
-  LIST_TABLES: "list_tables",
-  DESCRIBE_TABLE: "describe_table",
-  QUERY: "query"
-};
-
-let pool=null;
-let runtimeConfig=null;
-
 function boolFromEnv(value,fallback) {
   if(value===undefined) return fallback;
   return String(value).toLowerCase()==="true";
@@ -90,22 +112,329 @@ function firstDefined(...values) {
   return values.find((value) => value!==undefined);
 }
 
+function normalizeEngine(input) {
+  const normalized=String(input??"sqlserver").trim().toLowerCase();
+  if(!SUPPORTED_ENGINES.has(normalized)) {
+    throw new Error(`Unsupported DB engine: ${input}. Supported: sqlserver, postgres, mysql.`);
+  }
+  return normalized;
+}
+
+function getProfilesFilePath() {
+  return path.resolve(
+    firstDefined(
+      cliOptions.profilesFile,
+      process.env.DB_PROFILES_FILE,
+      path.join(os.homedir(),".mcp-servers","database-mcp","profiles.json")
+    )
+  );
+}
+
+function loadProfiles() {
+  const profilesPath=getProfilesFilePath();
+  if(!fs.existsSync(profilesPath)) {
+    return {
+      defaultServer: undefined,
+      currentServer: undefined,
+      currentDatabase: undefined,
+      servers: {},
+      defaultAlias: undefined,
+      aliases: {}
+    };
+  }
+
+  const raw=fs.readFileSync(profilesPath,"utf8").trim();
+  if(!raw) {
+    return {
+      defaultServer: undefined,
+      currentServer: undefined,
+      currentDatabase: undefined,
+      servers: {},
+      defaultAlias: undefined,
+      aliases: {}
+    };
+  }
+
+  const parsed=JSON.parse(raw);
+  if(!parsed||typeof parsed!=="object") {
+    return {
+      defaultServer: undefined,
+      currentServer: undefined,
+      currentDatabase: undefined,
+      servers: {},
+      defaultAlias: undefined,
+      aliases: {}
+    };
+  }
+
+  const servers=parsed.servers&&typeof parsed.servers==="object"? parsed.servers:{};
+  const defaultServer=typeof parsed.defaultServer==="string"&&parsed.defaultServer.trim().length>0
+    ? parsed.defaultServer.trim()
+    : undefined;
+  const currentServer=typeof parsed.currentServer==="string"&&parsed.currentServer.trim().length>0
+    ? parsed.currentServer.trim()
+    : undefined;
+  const currentDatabase=typeof parsed.currentDatabase==="string"&&parsed.currentDatabase.trim().length>0
+    ? parsed.currentDatabase.trim()
+    : undefined;
+
+  const aliases=parsed.aliases&&typeof parsed.aliases==="object"? parsed.aliases:{};
+  const defaultAlias=typeof parsed.defaultAlias==="string"&&parsed.defaultAlias.trim().length>0
+    ? parsed.defaultAlias.trim()
+    : undefined;
+
+  return {defaultServer,currentServer,currentDatabase,servers,defaultAlias,aliases};
+}
+
+function normalizeHostForCompare(value) {
+  return String(value??"").trim().toLowerCase();
+}
+
+function resolveSavedProfile(overrides={}) {
+  const profiles=loadProfiles();
+  const {servers,aliases}=profiles;
+
+  const requestedAlias=firstDefined(overrides.alias,cliOptions.alias,process.env.DB_ALIAS);
+  const requestedServerName=firstDefined(
+    overrides.serverName,
+    cliOptions.serverName,
+    overrides.currentServer,
+    cliOptions.currentServer,
+    process.env.DB_CURRENT_SERVER
+  );
+  const requestedHost=firstDefined(overrides.host,overrides.server,cliOptions.host,cliOptions.server,process.env.DB_HOST,process.env.DB_SERVER);
+
+  let source="none";
+  let aliasName;
+  let serverName;
+  let serverProfile;
+
+  if(requestedAlias) {
+    const aliasKey=String(requestedAlias).trim();
+    if(aliases[aliasKey]&&typeof aliases[aliasKey]==="object") {
+      source="alias";
+      aliasName=aliasKey;
+      serverProfile=aliases[aliasKey];
+    } else if(servers[aliasKey]&&typeof servers[aliasKey]==="object") {
+      source="serverName";
+      serverName=aliasKey;
+      serverProfile=servers[aliasKey];
+    }
+  }
+
+  if(!serverProfile&&requestedServerName) {
+    const key=String(requestedServerName).trim();
+    if(servers[key]&&typeof servers[key]==="object") {
+      source="serverName";
+      serverName=key;
+      serverProfile=servers[key];
+    }
+  }
+
+  if(!serverProfile&&requestedHost) {
+    const wanted=normalizeHostForCompare(requestedHost);
+    const found=Object.entries(servers).find(([,cfg]) => {
+      const hostA=normalizeHostForCompare(cfg?.host);
+      const hostB=normalizeHostForCompare(cfg?.server);
+      return wanted===hostA||wanted===hostB;
+    });
+    if(found) {
+      source="host";
+      serverName=found[0];
+      serverProfile=found[1];
+    }
+  }
+
+  if(!serverProfile&&profiles.currentServer&&servers[profiles.currentServer]) {
+    source="currentServer";
+    serverName=profiles.currentServer;
+    serverProfile=servers[profiles.currentServer];
+  }
+
+  if(!serverProfile&&profiles.defaultServer&&servers[profiles.defaultServer]) {
+    source="defaultServer";
+    serverName=profiles.defaultServer;
+    serverProfile=servers[profiles.defaultServer];
+  }
+
+  if(!serverProfile) {
+    const fallbackAlias=resolveAlias(overrides);
+    if(fallbackAlias&&aliases[fallbackAlias]&&typeof aliases[fallbackAlias]==="object") {
+      source="defaultAlias";
+      aliasName=fallbackAlias;
+      serverProfile=aliases[fallbackAlias];
+    }
+  }
+
+  let dbConfig;
+  const requestedDb=firstDefined(
+    overrides.database,
+    cliOptions.database,
+    profiles.currentDatabase,
+    process.env.DB_NAME,
+    process.env.DB_DATABASE
+  );
+
+  if(serverProfile?.databases&&Array.isArray(serverProfile.databases)) {
+    if(requestedDb) {
+      dbConfig=serverProfile.databases.find((db) => db?.name===requestedDb);
+    }
+    if(!dbConfig&&serverProfile.databases.length>0) {
+      dbConfig=serverProfile.databases[0];
+    }
+  }
+
+  return {
+    source,
+    aliasName,
+    serverName,
+    serverProfile,
+    dbConfig
+  };
+}
+
+function resolveAlias(overrides={}) {
+  const explicitAlias=firstDefined(overrides.alias,cliOptions.alias,process.env.DB_ALIAS);
+  if(explicitAlias) {
+    return String(explicitAlias).trim();
+  }
+
+  const defaultFromCliOrEnv=firstDefined(cliOptions.defaultAlias,process.env.DB_DEFAULT_ALIAS);
+  if(defaultFromCliOrEnv) {
+    return String(defaultFromCliOrEnv).trim();
+  }
+
+  return loadProfiles().defaultAlias;
+}
+
+function getAliasProfile(alias) {
+  if(!alias) {
+    return undefined;
+  }
+
+  const {aliases}=loadProfiles();
+  const profile=aliases[alias];
+  if(!profile||typeof profile!=="object") {
+    throw new Error(`Alias '${alias}' not found in ${getProfilesFilePath()}`);
+  }
+
+  return profile;
+}
+
+function getReadOnlyDefault() {
+  return boolFromEnv(firstDefined(cliOptions.readOnly,process.env.DB_READ_ONLY),true);
+}
+
+function getMaxRowsDefault() {
+  return intFromEnv(firstDefined(cliOptions.maxRows,process.env.DB_MAX_ROWS),200);
+}
+
 function buildConfig(overrides={}) {
+  const resolved=resolveSavedProfile(overrides);
+  const {serverProfile,dbConfig}=resolved;
+
+  const engine=normalizeEngine(
+    firstDefined(
+      overrides.engine,
+      cliOptions.engine,
+      serverProfile?.engine,
+      process.env.DB_ENGINE,
+      process.env.DB_TYPE,
+      "sqlserver"
+    )
+  );
+
   const connectionString=firstDefined(
     overrides.connectionString,
     cliOptions.connectionString,
+    serverProfile?.connectionString,
     process.env.DB_CONNECTION_STRING,
     process.env.DATABASE_URL
   );
 
-  const sharedOptions={
-    encrypt: boolFromEnv(firstDefined(cliOptions.encrypt,process.env.DB_ENCRYPT),true),
+  const host=firstDefined(
+    overrides.host,
+    overrides.server,
+    cliOptions.host,
+    cliOptions.server,
+    serverProfile?.host,
+    serverProfile?.server,
+    process.env.DB_HOST,
+    process.env.DB_SERVER
+  );
+
+  const port=intFromEnv(
+    firstDefined(overrides.port,cliOptions.port,serverProfile?.port,process.env.DB_PORT),
+    engine==="sqlserver"? 1433:(engine==="postgres"? 5432:3306)
+  );
+
+  const database=firstDefined(
+    overrides.database,
+    cliOptions.database,
+    dbConfig?.name,
+    serverProfile?.database,
+    process.env.DB_NAME,
+    process.env.DB_DATABASE
+  );
+
+  const user=firstDefined(overrides.user,cliOptions.user,serverProfile?.user,process.env.DB_USER);
+  const password=firstDefined(
+    overrides.password,
+    cliOptions.password,
+    serverProfile?.password,
+    process.env.DB_PASSWORD
+  );
+
+  const integratedAuth=boolFromEnv(
+    firstDefined(overrides.integratedAuth,serverProfile?.integratedAuth,process.env.DB_INTEGRATED_AUTH),
+    false
+  );
+
+  const config={
+    profileSource: resolved.source,
+    alias: resolved.aliasName,
+    serverName: resolved.serverName,
+    engine,
+    host,
+    port,
+    database,
+    integratedAuth,
+    user: integratedAuth? "":user,
+    password: integratedAuth? "":password,
+    connectionString,
+    readOnly: boolFromEnv(firstDefined(overrides.readOnly,dbConfig?.readOnly,serverProfile?.readOnly),getReadOnlyDefault()),
+    maxRows: intFromEnv(firstDefined(overrides.maxRows,dbConfig?.maxRows,serverProfile?.maxRows),getMaxRowsDefault()),
     trustServerCertificate: boolFromEnv(
-      firstDefined(cliOptions.trustServerCertificate,process.env.DB_TRUST_SERVER_CERT),
-      false
+      firstDefined(
+        overrides.trustServerCertificate,
+        cliOptions.trustServerCertificate,
+        serverProfile?.trustServerCertificate,
+        process.env.DB_TRUST_SERVER_CERT
+      ),
+      engine==="sqlserver"
+    ),
+    encrypt: boolFromEnv(
+      firstDefined(overrides.encrypt,cliOptions.encrypt,serverProfile?.encrypt,process.env.DB_ENCRYPT),
+      engine==="sqlserver"
+    ),
+    ssl: boolFromEnv(
+      firstDefined(overrides.ssl,cliOptions.ssl,serverProfile?.ssl,process.env.DB_SSL),
+      engine!=="sqlserver"
     )
   };
 
+  const requiredForAuth=integratedAuth? ["host","database"]:["host","database","user","password"];
+  const missingWithoutConnString=requiredForAuth.filter((key) => {
+    return !config.connectionString&&!config[key];
+  });
+  if(missingWithoutConnString.length>0) {
+    throw new Error(`Missing DB config fields: ${missingWithoutConnString.join(", ")}`);
+  }
+
+  return config;
+}
+
+function createSqlServerConfig(config) {
   const sharedPool={
     max: intFromEnv(process.env.DB_POOL_MAX,10),
     min: intFromEnv(process.env.DB_POOL_MIN,0),
@@ -117,95 +446,249 @@ function buildConfig(overrides={}) {
     requestTimeout: intFromEnv(process.env.DB_REQUEST_TIMEOUT_MS,15000)
   };
 
-  if(connectionString) {
-    const parsed=sql.ConnectionPool.parseConnectionString(connectionString);
+  if(config.connectionString) {
+    const parsed=sql.ConnectionPool.parseConnectionString(config.connectionString);
     return {
       ...parsed,
       ...sharedTimeouts,
-      ...overrides,
       options: {
         ...(parsed.options??{}),
-        ...sharedOptions,
-        ...(overrides.options??{})
+        encrypt: config.encrypt,
+        trustServerCertificate: config.trustServerCertificate
       },
       pool: {
         ...(parsed.pool??{}),
-        ...sharedPool,
-        ...(overrides.pool??{})
+        ...sharedPool
       }
     };
   }
 
-  const envConfig={
-    server: firstDefined(cliOptions.server,process.env.DB_SERVER),
-    port: intFromEnv(firstDefined(cliOptions.port,process.env.DB_PORT),1433),
-    database: firstDefined(cliOptions.database,process.env.DB_NAME),
-    user: firstDefined(cliOptions.user,process.env.DB_USER),
-    password: firstDefined(cliOptions.password,process.env.DB_PASSWORD),
-    options: sharedOptions,
+  const baseConfig={
+    server: config.host,
+    port: config.port,
+    database: config.database,
+    options: {
+      encrypt: config.encrypt,
+      trustServerCertificate: config.trustServerCertificate
+    },
     pool: sharedPool,
     ...sharedTimeouts
   };
 
-  const merged={
-    ...envConfig,
-    ...overrides,
-    options: {
-      ...envConfig.options,
-      ...(overrides.options??{})
-    },
-    pool: {
-      ...envConfig.pool,
-      ...(overrides.pool??{})
-    }
-  };
-
-  const missing=["server","database","user","password"].filter((k) => !merged[k]);
-  if(missing.length>0) {
-    throw new Error(`Missing SQL Server config fields: ${missing.join(", ")}`);
+  if(config.integratedAuth) {
+    baseConfig.authentication={
+      type: "default",
+      options: {
+        userName: undefined,
+        password: undefined
+      }
+    };
+  } else {
+    baseConfig.user=config.user;
+    baseConfig.password=config.password;
   }
 
-  return merged;
+  return baseConfig;
+}
+
+function createPostgresConfig(config) {
+  if(config.connectionString) {
+    return {
+      connectionString: config.connectionString,
+      ssl: config.ssl? {rejectUnauthorized: !config.trustServerCertificate}:false
+    };
+  }
+
+  return {
+    host: config.host,
+    port: config.port,
+    database: config.database,
+    user: config.user,
+    password: config.password,
+    ssl: config.ssl? {rejectUnauthorized: !config.trustServerCertificate}:false
+  };
+}
+
+function createMysqlConfig(config) {
+  if(config.connectionString) {
+    return {
+      uri: config.connectionString,
+      waitForConnections: true,
+      connectionLimit: intFromEnv(process.env.DB_POOL_MAX,10),
+      ssl: config.ssl
+        ? {rejectUnauthorized: !config.trustServerCertificate}
+        : undefined
+    };
+  }
+
+  return {
+    host: config.host,
+    port: config.port,
+    database: config.database,
+    user: config.user,
+    password: config.password,
+    waitForConnections: true,
+    connectionLimit: intFromEnv(process.env.DB_POOL_MAX,10),
+    ssl: config.ssl
+      ? {rejectUnauthorized: !config.trustServerCertificate}
+      : undefined
+  };
 }
 
 async function closePoolIfAny() {
-  if(pool) {
-    await pool.close();
-    pool=null;
+  if(!connection?.client) {
+    return;
   }
+
+  try {
+    if(connection.engine==="sqlserver") {
+      await connection.client.close();
+    } else if(connection.engine==="postgres") {
+      await connection.client.end();
+    } else if(connection.engine==="mysql") {
+      await connection.client.end();
+    }
+  } finally {
+    connection=null;
+  }
+}
+
+function compilePositionalQuery(sqlText,params,style) {
+  const values=[];
+  const pgIndexByName=new Map();
+
+  const text=sqlText.replace(/@([A-Za-z0-9_]+)/g,(_,name) => {
+    if(!(name in params)) {
+      throw new Error(`Missing parameter value: ${name}`);
+    }
+
+    if(style==="pg") {
+      if(!pgIndexByName.has(name)) {
+        pgIndexByName.set(name,values.length+1);
+        values.push(params[name]);
+      }
+      return `$${pgIndexByName.get(name)}`;
+    }
+
+    values.push(params[name]);
+    return "?";
+  });
+
+  return {text,values};
+}
+
+function normalizeQueryParams(params) {
+  if(!params||typeof params!=="object") {
+    return {};
+  }
+
+  for(const key of Object.keys(params)) {
+    if(!/^[A-Za-z0-9_]+$/.test(key)) {
+      throw new Error(`Invalid parameter name: ${key}`);
+    }
+  }
+
+  return params;
+}
+
+async function runSelectOne() {
+  if(!connection) {
+    throw new Error("Not connected.");
+  }
+
+  if(connection.engine==="sqlserver") {
+    const result=await connection.client.request().query("SELECT 1 AS ok");
+    return result.recordset?.[0]?.ok===1;
+  }
+
+  if(connection.engine==="postgres") {
+    const result=await connection.client.query("SELECT 1 AS ok");
+    return result.rows?.[0]?.ok===1;
+  }
+
+  const [rows]=await connection.client.query("SELECT 1 AS ok");
+  return rows?.[0]?.ok===1;
+}
+
+async function runQuery(sqlText,params={}) {
+  if(!connection) {
+    throw new Error("Not connected.");
+  }
+
+  const normalizedParams=normalizeQueryParams(params);
+
+  if(connection.engine==="sqlserver") {
+    const req=connection.client.request();
+    for(const [key,value] of Object.entries(normalizedParams)) {
+      req.input(key,value);
+    }
+    const result=await req.query(sqlText);
+    return result.recordset??[];
+  }
+
+  if(connection.engine==="postgres") {
+    const compiled=compilePositionalQuery(sqlText,normalizedParams,"pg");
+    const result=await connection.client.query(compiled.text,compiled.values);
+    return result.rows??[];
+  }
+
+  const compiled=compilePositionalQuery(sqlText,normalizedParams,"mysql");
+  const [rows]=await connection.client.query(compiled.text,compiled.values);
+  return Array.isArray(rows)? rows:[];
 }
 
 async function connectPool(overrides={}) {
   const config=buildConfig(overrides);
 
-  if(pool) {
-    await closePoolIfAny();
+  await closePoolIfAny();
+
+  if(config.engine==="sqlserver") {
+    const sqlConfig=createSqlServerConfig(config);
+    const client=await new sql.ConnectionPool(sqlConfig).connect();
+    connection={engine: "sqlserver",client};
+  } else if(config.engine==="postgres") {
+    const pgConfig=createPostgresConfig(config);
+    const client=new PostgresPool(pgConfig);
+    await client.query("SELECT 1");
+    connection={engine: "postgres",client};
+  } else {
+    const mysqlConfig=createMysqlConfig(config);
+    const client=mysql.createPool(mysqlConfig);
+    await client.query("SELECT 1");
+    connection={engine: "mysql",client};
   }
 
-  pool=await new sql.ConnectionPool(config).connect();
-  runtimeConfig=config;
+  runtimeConfig={...config};
+  runtimeSettings={
+    readOnly: config.readOnly,
+    maxRows: config.maxRows
+  };
 
   return {
     connected: true,
-    server: config.server,
+    alias: config.alias,
+    serverName: config.serverName,
+    profileSource: config.profileSource,
+    engine: config.engine,
+    host: config.host,
     database: config.database,
-    encrypt: config.options.encrypt,
-    trustServerCertificate: config.options.trustServerCertificate
+    readOnly: runtimeSettings.readOnly,
+    maxRows: runtimeSettings.maxRows
   };
 }
 
 async function ensureConnected() {
-  if(pool?.connected) {
-    return pool;
+  if(connection?.client) {
+    return connection;
   }
 
   if(runtimeConfig) {
-    pool=await new sql.ConnectionPool(runtimeConfig).connect();
-    return pool;
+    await connectPool(runtimeConfig);
+    return connection;
   }
 
   await connectPool();
-  return pool;
+  return connection;
 }
 
 function makeTextResult(data) {
@@ -233,11 +716,11 @@ function normalizeIdentifier(input,label) {
 }
 
 function getReadOnlyMode() {
-  return boolFromEnv(firstDefined(cliOptions.readOnly,process.env.DB_READ_ONLY),true);
+  return runtimeSettings.readOnly;
 }
 
 function getDefaultMaxRows() {
-  return intFromEnv(firstDefined(cliOptions.maxRows,process.env.DB_MAX_ROWS),200);
+  return runtimeSettings.maxRows;
 }
 
 function validateQuerySafety(sqlText) {
@@ -273,81 +756,84 @@ async function handleToolCall(name,args={}) {
   switch(name) {
     case TOOL_NAMES.CONNECT: {
       const overrides={
+        ...(args.alias? {alias: args.alias}:{}),
+        ...(args.engine? {engine: args.engine}:{}),
         ...(args.connectionString? {connectionString: args.connectionString}:{}),
+        ...(args.host? {host: args.host}:{}),
         ...(args.server? {server: args.server}:{}),
         ...(args.port? {port: Number(args.port)}:{}),
         ...(args.database? {database: args.database}:{}),
         ...(args.user? {user: args.user}:{}),
         ...(args.password? {password: args.password}:{}),
-        options: {
-          ...(args.encrypt!==undefined? {encrypt: Boolean(args.encrypt)}:{}),
-          ...(args.trustServerCertificate!==undefined
-            ? {trustServerCertificate: Boolean(args.trustServerCertificate)}
-            :{})
-        }
+        ...(args.readOnly!==undefined? {readOnly: Boolean(args.readOnly)}:{}),
+        ...(args.maxRows!==undefined? {maxRows: Number(args.maxRows)}:{}),
+        ...(args.encrypt!==undefined? {encrypt: Boolean(args.encrypt)}:{}),
+        ...(args.ssl!==undefined? {ssl: Boolean(args.ssl)}:{}),
+        ...(args.trustServerCertificate!==undefined
+          ? {trustServerCertificate: Boolean(args.trustServerCertificate)}
+          :{})
       };
 
       const result=await connectPool(overrides);
-      const dbInfo=await pool.request().query("SELECT @@VERSION AS version");
+      const versionRows=connection.engine==="sqlserver"
+        ? await runQuery("SELECT @@VERSION AS version")
+        : await runQuery("SELECT VERSION() AS version").catch(() => [{version: "unknown"}]);
 
       return makeTextResult({
         ...result,
-        version: dbInfo.recordset?.[0]?.version??"unknown"
+        version: versionRows?.[0]?.version??"unknown"
       });
     }
 
     case TOOL_NAMES.HEALTH_CHECK: {
-      const db=await ensureConnected();
+      await ensureConnected();
       const started=Date.now();
-      const ping=await db.request().query("SELECT 1 AS ok");
+      const ok=await runSelectOne();
       const latencyMs=Date.now()-started;
       return makeTextResult({
-        ok: ping.recordset?.[0]?.ok===1,
+        ok,
+        engine: connection?.engine,
         latencyMs
       });
     }
 
     case TOOL_NAMES.LIST_SCHEMAS: {
-      const db=await ensureConnected();
-      const result=await db.request().query(`
+      await ensureConnected();
+      const schemas=await runQuery(`
         SELECT schema_name
         FROM information_schema.schemata
         ORDER BY schema_name
       `);
-      return makeTextResult({schemas: result.recordset});
+      return makeTextResult({engine: connection.engine,schemas});
     }
 
     case TOOL_NAMES.LIST_TABLES: {
-      const db=await ensureConnected();
-      const req=db.request();
+      await ensureConnected();
 
       let query=`
         SELECT table_schema, table_name, table_type
         FROM information_schema.tables
       `;
+      const params={};
 
       if(args.schema) {
-        const schema=normalizeIdentifier(args.schema,"schema");
-        req.input("schema",schema);
+        params.schema=normalizeIdentifier(args.schema,"schema");
         query+=" WHERE table_schema = @schema";
       }
 
       query+=" ORDER BY table_schema, table_name";
 
-      const result=await req.query(query);
-      return makeTextResult({tables: result.recordset});
+      const tables=await runQuery(query,params);
+      return makeTextResult({engine: connection.engine,tables});
     }
 
     case TOOL_NAMES.DESCRIBE_TABLE: {
-      const db=await ensureConnected();
+      await ensureConnected();
+
       const schema=normalizeIdentifier(args.schema??"dbo","schema");
       const table=normalizeIdentifier(args.table,"table");
 
-      const columnsReq=db.request();
-      columnsReq.input("schema",schema);
-      columnsReq.input("table",table);
-
-      const columns=await columnsReq.query(`
+      const columns=await runQuery(`
         SELECT
           c.column_name,
           c.data_type,
@@ -360,12 +846,9 @@ async function handleToolCall(name,args={}) {
         FROM information_schema.columns c
         WHERE c.table_schema = @schema AND c.table_name = @table
         ORDER BY c.ordinal_position
-      `);
+      `,{schema,table});
 
-      const pkReq=db.request();
-      pkReq.input("schema",schema);
-      pkReq.input("table",table);
-      const primaryKeys=await pkReq.query(`
+      const primaryKeys=await runQuery(`
         SELECT kcu.column_name
         FROM information_schema.table_constraints tc
         JOIN information_schema.key_column_usage kcu
@@ -375,45 +858,66 @@ async function handleToolCall(name,args={}) {
           AND tc.table_schema = @schema
           AND tc.table_name = @table
         ORDER BY kcu.ordinal_position
-      `);
+      `,{schema,table});
 
-      const idxReq=db.request();
-      idxReq.input("schema",schema);
-      idxReq.input("table",table);
-      const indexes=await idxReq.query(`
-        SELECT
-          i.name AS index_name,
-          i.is_unique,
-          i.is_primary_key,
-          c.name AS column_name
-        FROM sys.indexes i
-        JOIN sys.index_columns ic
-          ON i.object_id = ic.object_id AND i.index_id = ic.index_id
-        JOIN sys.columns c
-          ON c.object_id = ic.object_id AND c.column_id = ic.column_id
-        JOIN sys.tables t
-          ON t.object_id = i.object_id
-        JOIN sys.schemas s
-          ON s.schema_id = t.schema_id
-        WHERE s.name = @schema
-          AND t.name = @table
-          AND i.is_hypothetical = 0
-        ORDER BY i.name, ic.key_ordinal
-      `);
+      let indexes=[];
+      if(connection.engine==="sqlserver") {
+        indexes=await runQuery(`
+          SELECT
+            i.name AS index_name,
+            i.is_unique,
+            i.is_primary_key,
+            c.name AS column_name
+          FROM sys.indexes i
+          JOIN sys.index_columns ic
+            ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+          JOIN sys.columns c
+            ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+          JOIN sys.tables t
+            ON t.object_id = i.object_id
+          JOIN sys.schemas s
+            ON s.schema_id = t.schema_id
+          WHERE s.name = @schema
+            AND t.name = @table
+            AND i.is_hypothetical = 0
+          ORDER BY i.name, ic.key_ordinal
+        `,{schema,table});
+      } else if(connection.engine==="postgres") {
+        indexes=await runQuery(`
+          SELECT indexname AS index_name, indexdef
+          FROM pg_indexes
+          WHERE schemaname = @schema
+            AND tablename = @table
+          ORDER BY indexname
+        `,{schema,table});
+      } else {
+        indexes=await runQuery(`
+          SELECT
+            index_name,
+            non_unique,
+            column_name,
+            seq_in_index
+          FROM information_schema.statistics
+          WHERE table_schema = @schema
+            AND table_name = @table
+          ORDER BY index_name, seq_in_index
+        `,{schema,table});
+      }
 
       return makeTextResult({
+        engine: connection.engine,
         schema,
         table,
-        columns: columns.recordset,
-        primaryKeys: primaryKeys.recordset,
-        indexes: indexes.recordset
+        columns,
+        primaryKeys,
+        indexes
       });
     }
 
     case TOOL_NAMES.QUERY: {
-      const db=await ensureConnected();
-      const sqlText=validateQuerySafety(args.sql);
+      await ensureConnected();
 
+      const sqlText=validateQuerySafety(args.sql);
       if(getReadOnlyMode()) {
         validateQuerySafety(sqlText);
       }
@@ -421,24 +925,13 @@ async function handleToolCall(name,args={}) {
       const maxRowsInput=args.maxRows!==undefined? Number(args.maxRows):getDefaultMaxRows();
       const maxRows=Number.isFinite(maxRowsInput)&&maxRowsInput>0? Math.min(maxRowsInput,2000):200;
 
-      const req=db.request();
-      const params=args.params&&typeof args.params==="object"? args.params:{};
-
-      for(const [key,value] of Object.entries(params)) {
-        if(!/^[A-Za-z0-9_]+$/.test(key)) {
-          throw new Error(`Invalid parameter name: ${key}`);
-        }
-        req.input(key,value);
-      }
-
       const started=Date.now();
-      const result=await req.query(sqlText);
+      const rows=await runQuery(sqlText,args.params&&typeof args.params==="object"? args.params:{});
       const latencyMs=Date.now()-started;
-
-      const rows=result.recordset??[];
       const limitedRows=rows.slice(0,maxRows);
 
       return makeTextResult({
+        engine: connection.engine,
         rowCount: rows.length,
         returnedRows: limitedRows.length,
         maxRows,
@@ -454,7 +947,7 @@ async function handleToolCall(name,args={}) {
 
 const server=new Server(
   {
-    name: "sqlserver-mcp",
+    name: "database-mcp",
     version: SERVER_VERSION
   },
   {
@@ -469,27 +962,34 @@ server.setRequestHandler(ListToolsRequestSchema,async () => {
     tools: [
       {
         name: TOOL_NAMES.CONNECT,
-        description: "Connect to SQL Server with optional runtime overrides.",
+        description: "Connect to a database (sqlserver, postgres, mysql) with optional alias/runtime overrides.",
         annotations: {
           readOnlyHint: true
         },
         inputSchema: {
           type: "object",
           properties: {
+            alias: {type: "string"},
+            serverName: {type: "string"},
+            engine: {type: "string",enum: ["sqlserver","postgres","mysql"]},
             connectionString: {type: "string"},
+            host: {type: "string"},
             server: {type: "string"},
             port: {type: "number"},
             database: {type: "string"},
             user: {type: "string"},
             password: {type: "string"},
             encrypt: {type: "boolean"},
-            trustServerCertificate: {type: "boolean"}
+            ssl: {type: "boolean"},
+            trustServerCertificate: {type: "boolean"},
+            readOnly: {type: "boolean"},
+            maxRows: {type: "number"}
           }
         }
       },
       {
         name: TOOL_NAMES.HEALTH_CHECK,
-        description: "Check current SQL Server connection health.",
+        description: "Check current database connection health.",
         annotations: {
           readOnlyHint: true
         },

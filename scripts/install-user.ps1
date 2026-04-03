@@ -5,18 +5,19 @@ param(
 $ErrorActionPreference = "Stop"
 
 $packageName = "@kingsnow129/sqlserver-mcp"
-$packageVersion = "0.2.4"
-$installRoot = Join-Path $HOME ".mcp-servers\sqlserver-mcp"
+$packageVersion = "0.3.0"
+$installRoot = Join-Path $HOME ".mcp-servers\database-mcp"
 $envTarget = Join-Path $installRoot ".env"
+$profilesTarget = Join-Path $installRoot "profiles.json"
 $userMcpConfigPath = Join-Path $env:APPDATA "Code\User\mcp.json"
 
 $serverConfig = @{
   type = "stdio"
   command = "node"
   args = @(
-    '${userHome}/.mcp-servers/sqlserver-mcp/node_modules/@kingsnow129/sqlserver-mcp/dist/server.js'
+    '${userHome}/.mcp-servers/database-mcp/node_modules/@kingsnow129/sqlserver-mcp/dist/server.js'
   )
-  envFile = '${userHome}/.mcp-servers/sqlserver-mcp/.env'
+  envFile = '${userHome}/.mcp-servers/database-mcp/.env'
 }
 
 Write-Host "Installing $packageName@$packageVersion into $installRoot"
@@ -37,6 +38,36 @@ try {
   if ((Test-Path $sourceEnv) -and (-not (Test-Path $envTarget))) {
     Copy-Item $sourceEnv $envTarget
     Write-Host "Created .env from .env.example at: $envTarget"
+  }
+
+  if (-not (Test-Path $profilesTarget)) {
+    $profiles = [pscustomobject]@{
+      defaultServer = "local-server"
+      currentServer = "local-server"
+      currentDatabase = "master"
+      servers = [pscustomobject]@{
+        "local-server" = [pscustomobject]@{
+          engine = "sqlserver"
+          host = "localhost"
+          port = 1433
+          integratedAuth = $false
+          user = "sa"
+          password = ""
+          encrypt = $true
+          trustServerCertificate = $true
+          databases = @(
+            [pscustomobject]@{
+              name = "master"
+              readOnly = $true
+              maxRows = 200
+            }
+          )
+        }
+      }
+    }
+
+    $profiles | ConvertTo-Json -Depth 10 | Set-Content -Path $profilesTarget -Encoding UTF8
+    Write-Host "Created profiles.json at: $profilesTarget"
   }
 }
 finally {
@@ -61,6 +92,12 @@ if (-not $SkipUserMcpConfig) {
     $mcpConfig | Add-Member -NotePropertyName servers -NotePropertyValue ([pscustomobject]@{})
   }
 
+  if ($mcpConfig.servers.PSObject.Properties.Name -contains "databaseMcp") {
+    $mcpConfig.servers.databaseMcp = [pscustomobject]$serverConfig
+  } else {
+    $mcpConfig.servers | Add-Member -NotePropertyName databaseMcp -NotePropertyValue ([pscustomobject]$serverConfig)
+  }
+  # Backward compatibility for existing users/tools.
   if ($mcpConfig.servers.PSObject.Properties.Name -contains "sqlserverMcp") {
     $mcpConfig.servers.sqlserverMcp = [pscustomobject]$serverConfig
   } else {
@@ -78,5 +115,6 @@ if (-not $SkipUserMcpConfig) {
 
 Write-Host ""
 Write-Host "Done. Single source of env config: $envTarget"
+Write-Host "Alias profile source: $profilesTarget"
 Write-Host "Open Command Palette and run: MCP: List Servers"
-Write-Host "Select sqlserverMcp to Start/Stop/Restart or Show Output logs."
+Write-Host "Select databaseMcp (or sqlserverMcp) to Start/Stop/Restart or Show Output logs."

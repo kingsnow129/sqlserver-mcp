@@ -1,12 +1,11 @@
-# SQL Server MCP Helper VSIX
+# Database MCP Helper VSIX
 
-This extension adds dedicated command-palette entries for SQL Server MCP setup and maintenance.
+This extension adds dedicated command-palette entries for Database MCP setup and maintenance.
 
 Commands:
-- `SQLServer MCP: Install Or Update (User)`
-- `SQLServer MCP: Open Env`
-- `SQLServer MCP: Open MCP Server List`
-- `SQLServer MCP: Open User MCP Configuration`
+- `Database MCP: Manage Databases`
+- `Database MCP: Open MCP Server List`
+- `Database MCP: Uninstall (User)`
 
 ## Build VSIX
 

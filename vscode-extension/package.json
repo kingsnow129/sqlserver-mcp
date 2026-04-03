@@ -1,8 +1,8 @@
 {
-  "name": "sqlserver-mcp-helper",
-  "displayName": "SQL Server MCP Helper",
-  "description": "Convenience commands for installing and managing SQL Server MCP in VS Code user profile.",
-  "version": "0.2.4",
+  "name": "database-mcp-helper",
+  "displayName": "Database MCP Helper",
+  "description": "Install, manage, and uninstall user-level Database MCP profiles in VS Code.",
+  "version": "0.3.0",
   "publisher": "kingsnow129",
   "repository": {
     "type": "git",
@@ -18,20 +18,16 @@
   "contributes": {
     "commands": [
       {
-        "command": "sqlserverMcp.installUser",
-        "title": "SQLServer MCP: Install Or Update (User)"
+        "command": "sqlserverMcp.uninstallUser",
+        "title": "Database MCP: Uninstall (User)"
       },
       {
-        "command": "sqlserverMcp.openEnv",
-        "title": "SQLServer MCP: Open Env"
+        "command": "sqlserverMcp.manageAliases",
+        "title": "Database MCP: Manage Databases"
       },
       {
         "command": "sqlserverMcp.openMcpListServers",
-        "title": "SQLServer MCP: Open MCP Server List"
-      },
-      {
-        "command": "sqlserverMcp.openUserMcpConfig",
-        "title": "SQLServer MCP: Open User MCP Configuration"
+        "title": "Database MCP: Open MCP Server List"
       }
     ]
   },

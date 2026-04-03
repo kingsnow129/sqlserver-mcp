@@ -1,9 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.kingsnow129/sqlserver-mcp",
-  "title": "SQL Server MCP",
-  "description": "Connect to SQL Server, inspect schemas/tables, describe table structure, and run safe SELECT queries.",
-  "version": "0.2.4",
+  "name": "io.github.kingsnow129/database-mcp",
+  "title": "Database MCP",
+  "description": "Connect to SQL Server, PostgreSQL, or MySQL, inspect schemas/tables, describe table structure, and run safe SELECT queries.",
+  "version": "0.3.0",
   "websiteUrl": "https://github.com/kingsnow129/sqlserver-mcp",
   "publisher": {
     "name": "kingsnow129",
@@ -20,7 +20,7 @@
     {
       "registryType": "npm",
       "identifier": "@kingsnow129/sqlserver-mcp",
-      "version": "0.2.4",
+      "version": "0.3.0",
       "transport": {
         "type": "stdio"
       },
@@ -28,7 +28,7 @@
         {
           "type": "named",
           "name": "--connectionString",
-          "description": "SQL Server connection string. Simplest single-input configuration for local install.",
+          "description": "Database connection string. Works with SQL Server, PostgreSQL, and MySQL.",
           "isSecret": true,
           "isRequired": false
         },
@@ -50,7 +50,7 @@
       "environmentVariables": [
         {
           "name": "DB_CONNECTION_STRING",
-          "description": "SQL Server connection string. Prefer this single variable when configuring the server.",
+          "description": "Database connection string. Prefer this single variable when configuring the server.",
           "isRequired": false,
           "isSecret": true,
           "placeholder": "Server=localhost,1433;Database=master;User Id=sa;Password=<password>;Encrypt=true;TrustServerCertificate=true"

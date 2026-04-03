@@ -1,8 +1,8 @@
 {
   "name": "@kingsnow129/sqlserver-mcp",
-  "version": "0.2.4",
-  "mcpName": "io.github.kingsnow129/sqlserver-mcp",
-  "description": "MCP server for SQL Server operations (connect, query, schema introspection)",
+  "version": "0.3.0",
+  "mcpName": "io.github.kingsnow129/database-mcp",
+  "description": "Database MCP server for SQL Server, PostgreSQL, and MySQL with profile-based auto resolution",
   "author": "kingsnow129",
   "type": "module",
   "main": "dist/server.js",
@@ -38,6 +38,8 @@
   },
   "keywords": [
     "mcp",
+    "postgres",
+    "mysql",
     "sqlserver",
     "database"
   ],
@@ -45,6 +47,8 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
     "dotenv": "^16.4.5",
-    "mssql": "^11.0.1"
+    "mysql2": "^3.11.3",
+    "mssql": "^11.0.1",
+    "pg": "^8.13.1"
   }
 }
