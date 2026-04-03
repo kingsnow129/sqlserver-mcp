@@ -7,8 +7,7 @@
   "type": "module",
   "main": "dist/server.js",
   "bin": {
-    "database-mcp": "dist/server.js",
-    "sqlserver-mcp": "dist/server.js"
+    "database-mcp": "dist/server.js"
   },
   "repository": {
     "type": "git",

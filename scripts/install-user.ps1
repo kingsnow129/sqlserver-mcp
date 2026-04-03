@@ -97,12 +97,6 @@ if (-not $SkipUserMcpConfig) {
   } else {
     $mcpConfig.servers | Add-Member -NotePropertyName databaseMcp -NotePropertyValue ([pscustomobject]$serverConfig)
   }
-  # Backward compatibility for existing users/tools.
-  if ($mcpConfig.servers.PSObject.Properties.Name -contains "sqlserverMcp") {
-    $mcpConfig.servers.sqlserverMcp = [pscustomobject]$serverConfig
-  } else {
-    $mcpConfig.servers | Add-Member -NotePropertyName sqlserverMcp -NotePropertyValue ([pscustomobject]$serverConfig)
-  }
 
   $parent = Split-Path -Parent $userMcpConfigPath
   if (-not (Test-Path $parent)) {
@@ -117,4 +111,4 @@ Write-Host ""
 Write-Host "Done. Single source of env config: $envTarget"
 Write-Host "Alias profile source: $profilesTarget"
 Write-Host "Open Command Palette and run: MCP: List Servers"
-Write-Host "Select databaseMcp (or sqlserverMcp) to Start/Stop/Restart or Show Output logs."
+Write-Host "Select databaseMcp to Start/Stop/Restart or Show Output logs."

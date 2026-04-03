@@ -11,12 +11,11 @@ function getUserPaths() {
   const home=os.homedir();
   const appData=process.env.APPDATA||path.join(home,"AppData","Roaming");
   const installRoot=path.join(home,".mcp-servers","database-mcp");
-  const legacyInstallRoot=path.join(home,".mcp-servers","sqlserver-mcp");
   const envPath=path.join(installRoot,".env");
   const profilesPath=path.join(installRoot,"profiles.json");
   const mcpJsonPath=path.join(appData,"Code","User","mcp.json");
 
-  return {installRoot,legacyInstallRoot,envPath,profilesPath,mcpJsonPath};
+  return {installRoot,envPath,profilesPath,mcpJsonPath};
 }
 
 function removeDirectoryIfExists(dirPath) {
@@ -49,25 +48,6 @@ function getMcpServerConfig() {
       "${userHome}/.mcp-servers/database-mcp/profiles.json"
     ]
   };
-}
-
-function migrateLegacyInstallIfNeeded() {
-  const {installRoot,legacyInstallRoot,envPath,profilesPath}=getUserPaths();
-  if(!fs.existsSync(legacyInstallRoot)||legacyInstallRoot===installRoot) {
-    return;
-  }
-
-  fs.mkdirSync(installRoot,{recursive: true});
-
-  const legacyEnv=path.join(legacyInstallRoot,".env");
-  const legacyProfiles=path.join(legacyInstallRoot,"profiles.json");
-
-  if(!fs.existsSync(envPath)&&fs.existsSync(legacyEnv)) {
-    fs.copyFileSync(legacyEnv,envPath);
-  }
-  if(!fs.existsSync(profilesPath)&&fs.existsSync(legacyProfiles)) {
-    fs.copyFileSync(legacyProfiles,profilesPath);
-  }
 }
 
 function ensureEnvFile(envPath) {
@@ -930,7 +910,6 @@ async function installOrUpdateUser() {
   const {installRoot,envPath,profilesPath,mcpJsonPath}=getUserPaths();
   const npmCmd=process.platform==="win32"? "npm.cmd":"npm";
 
-  migrateLegacyInstallIfNeeded();
   fs.mkdirSync(installRoot,{recursive: true});
 
   const packageJsonPath=path.join(installRoot,"package.json");
@@ -948,15 +927,13 @@ async function installOrUpdateUser() {
     mcpConfig.servers={};
   }
   mcpConfig.servers.databaseMcp=getMcpServerConfig();
-  // Keep old key for existing clients that still reference sqlserverMcp.
-  mcpConfig.servers.sqlserverMcp=getMcpServerConfig();
   writeJson(mcpJsonPath,mcpConfig);
 
   vscode.window.showInformationMessage("Database MCP installed successfully. Ready to use.");
 }
 
 async function uninstallUser() {
-  const {installRoot,legacyInstallRoot,mcpJsonPath}=getUserPaths();
+  const {installRoot,mcpJsonPath}=getUserPaths();
 
   const choice=await vscode.window.showWarningMessage(
     "This will remove Database MCP runtime files and MCP config entries for this user.",
@@ -971,12 +948,10 @@ async function uninstallUser() {
   const mcpConfig=readJsonIfExists(mcpJsonPath);
   if(mcpConfig.servers&&typeof mcpConfig.servers==="object") {
     delete mcpConfig.servers.databaseMcp;
-    delete mcpConfig.servers.sqlserverMcp;
     writeJson(mcpJsonPath,mcpConfig);
   }
 
   removeDirectoryIfExists(installRoot);
-  removeDirectoryIfExists(legacyInstallRoot);
 
   vscode.window.showInformationMessage("Database MCP user runtime/config removed. You can now uninstall the extension.");
 }

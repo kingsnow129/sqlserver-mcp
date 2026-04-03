@@ -37,7 +37,7 @@ Current release:
   - `Database MCP: Manage Databases`
   - `Database MCP: Open MCP Server List`
   - `Database MCP: Uninstall (User)`
-- Legacy `sqlserverMcp` key is still written for compatibility.
+- Only `databaseMcp` key is written to MCP config.
 
 ## Quick Start (MCP Config)
 
