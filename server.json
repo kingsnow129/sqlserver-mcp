@@ -3,7 +3,7 @@
   "name": "io.github.kingsnow129/sqlserver-mcp",
   "title": "SQL Server MCP",
   "description": "Connect to SQL Server, inspect schemas/tables, describe table structure, and run safe SELECT queries.",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "websiteUrl": "https://github.com/kingsnow129/sqlserver-mcp",
   "publisher": {
     "name": "kingsnow129",
@@ -20,19 +20,45 @@
     {
       "registryType": "npm",
       "identifier": "@kingsnow129/sqlserver-mcp",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "transport": {
         "type": "stdio"
       },
-      "command": "node",
-      "args": [
-        "${packagePath}/dist/server.js"
+      "packageArguments": [
+        {
+          "type": "named",
+          "name": "--connectionString",
+          "description": "SQL Server connection string. Simplest single-input configuration for local install.",
+          "isSecret": true,
+          "isRequired": false
+        },
+        {
+          "type": "named",
+          "name": "--readOnly",
+          "description": "When true, block non-SELECT statements.",
+          "format": "boolean",
+          "isRequired": false
+        },
+        {
+          "type": "named",
+          "name": "--maxRows",
+          "description": "Maximum rows returned by the query tool.",
+          "format": "number",
+          "isRequired": false
+        }
       ],
       "environmentVariables": [
         {
+          "name": "DB_CONNECTION_STRING",
+          "description": "SQL Server connection string. Prefer this single variable when configuring the server.",
+          "isRequired": false,
+          "isSecret": true,
+          "placeholder": "Server=localhost,1433;Database=master;User Id=sa;Password=<password>;Encrypt=true;TrustServerCertificate=true"
+        },
+        {
           "name": "DB_SERVER",
           "description": "SQL Server host name or IP",
-          "isRequired": true,
+          "isRequired": false,
           "placeholder": "localhost"
         },
         {
@@ -43,19 +69,19 @@
         {
           "name": "DB_NAME",
           "description": "Database name",
-          "isRequired": true,
+          "isRequired": false,
           "placeholder": "master"
         },
         {
           "name": "DB_USER",
           "description": "Database user",
-          "isRequired": true,
+          "isRequired": false,
           "placeholder": "sa"
         },
         {
           "name": "DB_PASSWORD",
           "description": "Database password",
-          "isRequired": true,
+          "isRequired": false,
           "isSecret": true,
           "placeholder": "<your-password>"
         },

@@ -26,6 +26,11 @@ const extPkg=JSON.parse(await readFile(extPkgPath,"utf8"));
 extPkg.version=version;
 await writeFile(extPkgPath,JSON.stringify(extPkg,null,2)+"\n");
 
+const installScriptPath=path.join(rootDir,"scripts","install-user.ps1");
+const installScript=(await readFile(installScriptPath,"utf8"))
+	.replace(/\$packageVersion = \"[^\"]+\"/,`$packageVersion = \"${version}\"`);
+await writeFile(installScriptPath,installScript);
+
 await mkdir(distDir,{recursive: true});
 await copyFile(sourceFile,targetFile);
 await chmod(targetFile,0o755);

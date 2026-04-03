@@ -10,13 +10,13 @@ A minimal MCP server for SQL Server that supports:
 
 ### Install from npm (Recommended)
 
-**This is the easiest and most reliable way to install. The package is published to npm registry and can be installed in any workspace.**
+Install the published package:
 
 ```bash
 npm install @kingsnow129/sqlserver-mcp
 ```
 
-Then configure it in your VS Code workspace by creating `.vscode/mcp.json`:
+Then configure `.vscode/mcp.json`:
 
 ```json
 {
@@ -33,9 +33,17 @@ Then configure it in your VS Code workspace by creating `.vscode/mcp.json`:
 }
 ```
 
-Copy `.env.example` to `.env` and configure your SQL Server connection details.
+For the simplest setup, use a single connection string in `.env`:
 
-If you want a direct CLI entry after installation, the package also exposes `sqlserver-mcp` via npm `bin`.
+```dotenv
+DB_CONNECTION_STRING=Server=localhost,1433;Database=master;User Id=sa;Password=<password>;Encrypt=true;TrustServerCertificate=true
+DB_READ_ONLY=true
+DB_MAX_ROWS=200
+```
+
+If you prefer separate variables, copy `.env.example` to `.env` and fill in `DB_SERVER`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`.
+
+The package also accepts install-time flags such as `--connectionString`, `--readOnly`, and `--maxRows`.
 
 **For Windows users:** Use the automated installer script below for hassle-free setup across all workspaces.
 
@@ -68,7 +76,7 @@ It launches the server with:
 }
 ```
 
-This is the recommended configuration for this repository because it is stable on Windows and does not require hardcoding database credentials into source control.
+This is the recommended local configuration for this repository.
 
 ## User-Level Install (Recommended)
 
@@ -121,6 +129,15 @@ After running the installer:
 
 This gives you user-level MCP visibility and management from Command Palette instead of workspace-only setup, while keeping one env source at `%USERPROFILE%\\.mcp-servers\\sqlserver-mcp\\.env`.
 
+### Configuration model
+
+Prefer `DB_CONNECTION_STRING` for the cleanest install experience.
+
+Supported command-line flags for package-based installs are:
+- `--connectionString`
+- `--readOnly`
+- `--maxRows`
+
 ## Optional: Dedicated Command Entries via VSIX
 
 If you want your own command names in `Ctrl+Shift+P` (instead of only built-in `MCP:*` commands), use the extension in `vscode-extension/`.
@@ -154,7 +171,7 @@ Then open `.vscode/mcp.json` in VS Code and start the server, or run `MCP: List 
 Install the package into the target workspace:
 
 ```bash
-npm install @kingsnow129/sqlserver-mcp@0.2.1
+npm install @kingsnow129/sqlserver-mcp@0.2.4
 ```
 
 Create `.vscode/mcp.json` in that workspace:
@@ -174,7 +191,7 @@ Create `.vscode/mcp.json` in that workspace:
 }
 ```
 
-Copy `.env.example` from the package or repository into `.env` and update the values.
+Copy `.env.example` from the package or repository into `.env`, then preferably set `DB_CONNECTION_STRING`.
 
 ## 3) Configuration Notes
 
@@ -200,15 +217,15 @@ The following validation steps were verified:
 
 - `npm pack --dry-run` includes only the expected runtime files
 - `npm run build` creates `dist/server.js` for runtime and publishing
-- the published package `@kingsnow129/sqlserver-mcp@0.2.1` was installed into a clean directory and successfully answered an MCP `listTools` request
+- the published package `@kingsnow129/sqlserver-mcp@0.2.4` was installed into a clean directory and successfully answered an MCP `listTools` request
 - Copilot-visible tools discovered during validation were `connect`, `health_check`, `list_schemas`, `list_tables`, `describe_table`, and `query`
 
-On this Windows environment, `npx -y @kingsnow129/sqlserver-mcp@0.2.1` did not start reliably, so the manifest intentionally uses a direct `node .../dist/server.js` launch instead of the `npx <package>` shorthand.
+On this Windows environment, direct `node .../dist/server.js` launch remains the most reliable manual fallback in local manifests.
 
 ## 6) Tools
 
 - `connect`
-  - Optional overrides: `server`, `port`, `database`, `user`, `password`, `encrypt`, `trustServerCertificate`
+  - Optional overrides: `connectionString`, `server`, `port`, `database`, `user`, `password`, `encrypt`, `trustServerCertificate`
 - `health_check`
 - `list_schemas`
 - `list_tables`

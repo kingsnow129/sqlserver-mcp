@@ -10,6 +10,60 @@ import {CallToolRequestSchema,ListToolsRequestSchema} from "@modelcontextprotoco
 
 dotenv.config();
 
+const CLI_OPTION_MAP={
+  connectionString: "connectionString",
+  server: "server",
+  port: "port",
+  database: "database",
+  user: "user",
+  password: "password",
+  encrypt: "encrypt",
+  trustServerCertificate: "trustServerCertificate",
+  readOnly: "readOnly",
+  maxRows: "maxRows"
+};
+
+function parseCliArgs(argv) {
+  const parsed={};
+
+  for(let index=0;index<argv.length;index+=1) {
+    const token=argv[index];
+    if(!String(token).startsWith("--")) {
+      continue;
+    }
+
+    const rawToken=String(token).slice(2);
+    if(rawToken==="help") {
+      console.error("Supported flags: --connectionString --server --port --database --user --password --encrypt --trustServerCertificate --readOnly --maxRows");
+      process.exit(0);
+    }
+
+    const equalsIndex=rawToken.indexOf("=");
+    const rawName=equalsIndex===-1? rawToken:rawToken.slice(0,equalsIndex);
+    const mappedName=CLI_OPTION_MAP[rawName];
+    if(!mappedName) {
+      continue;
+    }
+
+    let value=equalsIndex===-1? undefined:rawToken.slice(equalsIndex+1);
+    if(value===undefined) {
+      const nextToken=argv[index+1];
+      if(nextToken!==undefined&&!String(nextToken).startsWith("--")) {
+        value=String(nextToken);
+        index+=1;
+      } else {
+        value="true";
+      }
+    }
+
+    parsed[mappedName]=value;
+  }
+
+  return parsed;
+}
+
+const cliOptions=parseCliArgs(process.argv.slice(2));
+
 const TOOL_NAMES={
   CONNECT: "connect",
   HEALTH_CHECK: "health_check",
@@ -32,24 +86,65 @@ function intFromEnv(value,fallback) {
   return Number.isFinite(parsed)? parsed:fallback;
 }
 
+function firstDefined(...values) {
+  return values.find((value) => value!==undefined);
+}
+
 function buildConfig(overrides={}) {
-  const envConfig={
-    server: process.env.DB_SERVER,
-    port: intFromEnv(process.env.DB_PORT,1433),
-    database: process.env.DB_NAME,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    options: {
-      encrypt: boolFromEnv(process.env.DB_ENCRYPT,true),
-      trustServerCertificate: boolFromEnv(process.env.DB_TRUST_SERVER_CERT,false)
-    },
-    pool: {
-      max: intFromEnv(process.env.DB_POOL_MAX,10),
-      min: intFromEnv(process.env.DB_POOL_MIN,0),
-      idleTimeoutMillis: intFromEnv(process.env.DB_POOL_IDLE_TIMEOUT_MS,30000)
-    },
+  const connectionString=firstDefined(
+    overrides.connectionString,
+    cliOptions.connectionString,
+    process.env.DB_CONNECTION_STRING,
+    process.env.DATABASE_URL
+  );
+
+  const sharedOptions={
+    encrypt: boolFromEnv(firstDefined(cliOptions.encrypt,process.env.DB_ENCRYPT),true),
+    trustServerCertificate: boolFromEnv(
+      firstDefined(cliOptions.trustServerCertificate,process.env.DB_TRUST_SERVER_CERT),
+      false
+    )
+  };
+
+  const sharedPool={
+    max: intFromEnv(process.env.DB_POOL_MAX,10),
+    min: intFromEnv(process.env.DB_POOL_MIN,0),
+    idleTimeoutMillis: intFromEnv(process.env.DB_POOL_IDLE_TIMEOUT_MS,30000)
+  };
+
+  const sharedTimeouts={
     connectionTimeout: intFromEnv(process.env.DB_CONN_TIMEOUT_MS,15000),
     requestTimeout: intFromEnv(process.env.DB_REQUEST_TIMEOUT_MS,15000)
+  };
+
+  if(connectionString) {
+    const parsed=sql.ConnectionPool.parseConnectionString(connectionString);
+    return {
+      ...parsed,
+      ...sharedTimeouts,
+      ...overrides,
+      options: {
+        ...(parsed.options??{}),
+        ...sharedOptions,
+        ...(overrides.options??{})
+      },
+      pool: {
+        ...(parsed.pool??{}),
+        ...sharedPool,
+        ...(overrides.pool??{})
+      }
+    };
+  }
+
+  const envConfig={
+    server: firstDefined(cliOptions.server,process.env.DB_SERVER),
+    port: intFromEnv(firstDefined(cliOptions.port,process.env.DB_PORT),1433),
+    database: firstDefined(cliOptions.database,process.env.DB_NAME),
+    user: firstDefined(cliOptions.user,process.env.DB_USER),
+    password: firstDefined(cliOptions.password,process.env.DB_PASSWORD),
+    options: sharedOptions,
+    pool: sharedPool,
+    ...sharedTimeouts
   };
 
   const merged={
@@ -138,11 +233,11 @@ function normalizeIdentifier(input,label) {
 }
 
 function getReadOnlyMode() {
-  return boolFromEnv(process.env.DB_READ_ONLY,true);
+  return boolFromEnv(firstDefined(cliOptions.readOnly,process.env.DB_READ_ONLY),true);
 }
 
 function getDefaultMaxRows() {
-  return intFromEnv(process.env.DB_MAX_ROWS,200);
+  return intFromEnv(firstDefined(cliOptions.maxRows,process.env.DB_MAX_ROWS),200);
 }
 
 function validateQuerySafety(sqlText) {
@@ -178,6 +273,7 @@ async function handleToolCall(name,args={}) {
   switch(name) {
     case TOOL_NAMES.CONNECT: {
       const overrides={
+        ...(args.connectionString? {connectionString: args.connectionString}:{}),
         ...(args.server? {server: args.server}:{}),
         ...(args.port? {port: Number(args.port)}:{}),
         ...(args.database? {database: args.database}:{}),
@@ -380,6 +476,7 @@ server.setRequestHandler(ListToolsRequestSchema,async () => {
         inputSchema: {
           type: "object",
           properties: {
+            connectionString: {type: "string"},
             server: {type: "string"},
             port: {type: "number"},
             database: {type: "string"},

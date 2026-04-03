@@ -2,7 +2,7 @@
   "name": "sqlserver-mcp-helper",
   "displayName": "SQL Server MCP Helper",
   "description": "Convenience commands for installing and managing SQL Server MCP in VS Code user profile.",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "publisher": "kingsnow129",
   "repository": {
     "type": "git",
