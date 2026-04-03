@@ -1,6 +1,6 @@
 {
   "name": "@kingsnow129/database-mcp",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "mcpName": "io.github.kingsnow129/database-mcp",
   "description": "Database MCP server for SQL Server, PostgreSQL, and MySQL with profile-based auto resolution",
   "author": "kingsnow129",
@@ -51,5 +51,8 @@
     "mysql2": "^3.11.3",
     "mssql": "^11.0.1",
     "pg": "^8.13.1"
+  },
+  "optionalDependencies": {
+    "msnodesqlv8": "^4.4.0"
   }
 }

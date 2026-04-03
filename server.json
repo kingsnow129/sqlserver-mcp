@@ -3,7 +3,7 @@
   "name": "io.github.kingsnow129/database-mcp",
   "title": "Database MCP",
   "description": "Connect to SQL Server, PostgreSQL, or MySQL, inspect schemas/tables, describe table structure, and run safe SELECT queries.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "websiteUrl": "https://github.com/kingsnow129/database-mcp",
   "publisher": {
     "name": "kingsnow129",
@@ -20,7 +20,7 @@
     {
       "registryType": "npm",
       "identifier": "@kingsnow129/database-mcp",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "transport": {
         "type": "stdio"
       },

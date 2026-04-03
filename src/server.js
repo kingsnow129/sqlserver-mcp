@@ -17,6 +17,8 @@ dotenv.config();
 
 const {Pool: PostgresPool}=pg;
 
+let sqlMsnodesqlv8Cache;
+
 const SUPPORTED_ENGINES=new Set(["sqlserver","postgres","mysql"]);
 
 const CLI_OPTION_MAP={
@@ -35,6 +37,7 @@ const CLI_OPTION_MAP={
   database: "database",
   user: "user",
   password: "password",
+  integratedAuth: "integratedAuth",
   encrypt: "encrypt",
   ssl: "ssl",
   trustServerCertificate: "trustServerCertificate",
@@ -69,7 +72,7 @@ function parseCliArgs(argv) {
 
     const rawToken=String(token).slice(2);
     if(rawToken==="help") {
-      console.error("Supported flags: --target --alias --serverName --defaultAlias --profilesFile --currentServer --currentDatabase --engine --host --connectionString --server --port --database --user --password --encrypt --ssl --trustServerCertificate --readOnly --maxRows");
+      console.error("Supported flags: --target --alias --serverName --defaultAlias --profilesFile --currentServer --currentDatabase --engine --host --connectionString --server --port --database --user --password --integratedAuth --encrypt --ssl --trustServerCertificate --readOnly --maxRows");
       process.exit(0);
     }
 
@@ -412,7 +415,12 @@ function buildConfig(overrides={}) {
   );
 
   const integratedAuth=boolFromEnv(
-    firstDefined(overrides.integratedAuth,serverProfile?.integratedAuth,process.env.DB_INTEGRATED_AUTH),
+    firstDefined(
+      overrides.integratedAuth,
+      cliOptions.integratedAuth,
+      serverProfile?.integratedAuth,
+      process.env.DB_INTEGRATED_AUTH
+    ),
     false
   );
 
@@ -503,12 +511,9 @@ function createSqlServerConfig(config) {
   };
 
   if(config.integratedAuth) {
-    baseConfig.authentication={
-      type: "default",
-      options: {
-        userName: undefined,
-        password: undefined
-      }
+    baseConfig.options={
+      ...baseConfig.options,
+      trustedConnection: true
     };
   } else {
     baseConfig.user=config.user;
@@ -516,6 +521,36 @@ function createSqlServerConfig(config) {
   }
 
   return baseConfig;
+}
+
+function getSqlServerDriver(config) {
+  if(!config.integratedAuth) {
+    return {
+      module: sql,
+      driverName: "tedious"
+    };
+  }
+
+  if(process.platform!=="win32") {
+    throw new Error("SQL Server integratedAuth is only supported on Windows hosts.");
+  }
+
+  if(sqlMsnodesqlv8Cache===undefined) {
+    try {
+      sqlMsnodesqlv8Cache=_require("mssql/msnodesqlv8");
+    } catch {
+      sqlMsnodesqlv8Cache=null;
+    }
+  }
+
+  if(!sqlMsnodesqlv8Cache) {
+    throw new Error("Integrated auth requires the optional dependency 'msnodesqlv8'. Install it and restart MCP.");
+  }
+
+  return {
+    module: sqlMsnodesqlv8Cache,
+    driverName: "msnodesqlv8"
+  };
 }
 
 function createPostgresConfig(config) {
@@ -670,9 +705,10 @@ async function connectPool(overrides={}) {
   await closePoolIfAny();
 
   if(config.engine==="sqlserver") {
+    const sqlDriver=getSqlServerDriver(config);
     const sqlConfig=createSqlServerConfig(config);
-    const client=await new sql.ConnectionPool(sqlConfig).connect();
-    connection={engine: "sqlserver",client};
+    const client=await new sqlDriver.module.ConnectionPool(sqlConfig).connect();
+    connection={engine: "sqlserver",client,sqlDriver: sqlDriver.driverName};
   } else if(config.engine==="postgres") {
     const pgConfig=createPostgresConfig(config);
     const client=new PostgresPool(pgConfig);
@@ -697,8 +733,10 @@ async function connectPool(overrides={}) {
     serverName: config.serverName,
     profileSource: config.profileSource,
     engine: config.engine,
+    sqlDriver: connection?.sqlDriver,
     host: config.host,
     database: config.database,
+    integratedAuth: config.integratedAuth,
     readOnly: runtimeSettings.readOnly,
     maxRows: runtimeSettings.maxRows
   };
@@ -797,6 +835,7 @@ async function handleToolCall(name,args={}) {
         ...(args.database? {database: args.database}:{}),
         ...(args.user? {user: args.user}:{}),
         ...(args.password? {password: args.password}:{}),
+        ...(args.integratedAuth!==undefined? {integratedAuth: Boolean(args.integratedAuth)}:{}),
         ...(args.maxRows!==undefined? {maxRows: Number(args.maxRows)}:{}),
         ...(args.encrypt!==undefined? {encrypt: Boolean(args.encrypt)}:{}),
         ...(args.ssl!==undefined? {ssl: Boolean(args.ssl)}:{}),
@@ -1011,6 +1050,7 @@ server.setRequestHandler(ListToolsRequestSchema,async () => {
             database: {type: "string"},
             user: {type: "string"},
             password: {type: "string"},
+            integratedAuth: {type: "boolean"},
             encrypt: {type: "boolean"},
             ssl: {type: "boolean"},
             trustServerCertificate: {type: "boolean"},

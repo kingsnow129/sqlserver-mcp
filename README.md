@@ -13,15 +13,15 @@ It provides tools for:
 ## Release
 
 Current release:
-- NPM package: `@kingsnow129/database-mcp@0.4.1`
+- NPM package: `@kingsnow129/database-mcp@0.4.2`
 - MCP server name: `database-mcp`
-- VSIX helper: `database-mcp-helper@0.4.1`
+- VSIX helper: `database-mcp-helper@0.4.2`
 
-## What Is New In 0.4.1
+## What Is New In 0.4.2
 
-- Enforced hard read-only mode for all connections (no override).
-- Added stronger query safety blocks for execution patterns.
-- Allowed spaces in server profile names in VSIX manager (e.g. `QA EUD`).
+- Added SQL Server Windows integrated auth support with `integratedAuth`.
+- Added `--integratedAuth` CLI override handling in `connect` flow.
+- Added optional dependency `msnodesqlv8` for integrated auth SQL Server driver.
 
 ## What Was Introduced In 0.4.0
 
@@ -117,7 +117,7 @@ Build and install locally:
 cd vscode-extension
 npm install
 npm run package
-code --install-extension database-mcp-helper-0.4.1.vsix --force
+code --install-extension database-mcp-helper-0.4.2.vsix --force
 ```
 
 ## Safety Defaults
